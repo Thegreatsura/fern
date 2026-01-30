@@ -6,6 +6,14 @@
   createdAt: "2026-01-30"
   irVersion: 63
 
+- version: 3.55.1
+  changelogEntry:
+    - summary: |
+        Fix `fern docs diff` production URL construction when docs instance URL has a base path (e.g., `/learn`).
+      type: fix
+  createdAt: "2026-01-30"
+  irVersion: 63
+
 - version: 3.55.0
   changelogEntry:
     - summary: |
