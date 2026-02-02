@@ -1,3 +1,4 @@
+import { GraphQLSpec } from "@fern-api/api-workspace-commons";
 import { SourceResolverImpl } from "@fern-api/cli-source-resolver";
 import { docsYml, parseAudiences, parseDocsConfiguration, WithoutQuestionMarks } from "@fern-api/configuration-loader";
 import { assertNever, isNonNullish, replaceEnvVariables, visitDiscriminatedUnion } from "@fern-api/core-utils";
@@ -9,8 +10,9 @@ import {
     replaceReferencedCode,
     replaceReferencedMarkdown
 } from "@fern-api/docs-markdown-utils";
-import { APIV1Write, DocsV1Write, FernNavigation } from "@fern-api/fdr-sdk";
+import { APIV1Write, DocsV1Write, FdrAPI, FernNavigation } from "@fern-api/fdr-sdk";
 import { AbsoluteFilePath, join, listFiles, RelativeFilePath, relative, resolve } from "@fern-api/fs-utils";
+import { GraphQLConverter } from "@fern-api/graphql-to-fdr";
 import { generateIntermediateRepresentation } from "@fern-api/ir-generator";
 import { IntermediateRepresentation } from "@fern-api/ir-sdk";
 import { OSSWorkspace } from "@fern-api/lazy-fern-workspace";
@@ -54,6 +56,8 @@ type RegisterApiFn = (opts: {
     playgroundConfig?: PlaygroundConfig;
     apiName?: string;
     workspace?: FernWorkspace;
+    graphqlOperations?: Record<APIV1Write.GraphQlOperationId, APIV1Write.GraphQlOperation>;
+    graphqlTypes?: Record<APIV1Write.TypeId, APIV1Write.TypeDefinition>;
 }) => AsyncOrSync<string>;
 
 type ConfigureAiChatFn = (opts: { aiChatConfig: DocsV1Write.AiChatConfig | undefined }) => AsyncOrSync<void>;
@@ -1338,6 +1342,9 @@ export class DocsDefinitionResolver {
             );
         }
 
+        // Extract GraphQL operations and types from the workspace
+        const graphqlData = await this.extractGraphQLData();
+
         // Use item.apiName (from api-name in docs.yml) if explicitly set,
         // otherwise fall back to the workspace's folder name for FDR registration.
         // This allows users to reference APIs by folder name in docs components like <Schema api="latest" />
@@ -1348,13 +1355,19 @@ export class DocsDefinitionResolver {
             snippetsConfig,
             playgroundConfig: { oauth: item.playground?.oauth },
             apiName: apiNameForRegistration,
-            workspace
+            workspace,
+            graphqlOperations: graphqlData.operations,
+            graphqlTypes: graphqlData.types
         });
+
+        // Create API definition WITH GraphQL operations (single full conversion)
         const api = convertIrToApiDefinition({
             ir,
             apiDefinitionId,
             playgroundConfig: { oauth: item.playground?.oauth },
-            context: this.taskContext
+            context: this.taskContext,
+            graphqlOperations: graphqlData.operations,
+            graphqlTypes: graphqlData.types
         });
 
         const node = new ApiReferenceNodeConverter(
@@ -1371,7 +1384,8 @@ export class DocsDefinitionResolver {
             workspace,
             hideChildren,
             parentAvailability ?? item.availability,
-            openApiTags
+            openApiTags,
+            graphqlData.namespacesByOperationId
         );
 
         // Extract tag description content and add it to both rawMarkdownFiles and parsedDocsConfig.pages
@@ -1437,6 +1451,53 @@ export class DocsDefinitionResolver {
             icon: this.resolveIconFileId(item.icon),
             target: item.target
         };
+    }
+
+    /**
+     * Extract GraphQL operations from a workspace
+     */
+    private async extractGraphQLData(): Promise<{
+        operations: Record<FdrAPI.GraphQlOperationId, FdrAPI.api.v1.register.GraphQlOperation>;
+        types: Record<FdrAPI.TypeId, FdrAPI.api.v1.register.TypeDefinition>;
+        namespacesByOperationId: Map<FdrAPI.GraphQlOperationId, string>;
+    }> {
+        const graphqlOperations: Record<FdrAPI.GraphQlOperationId, FdrAPI.api.v1.register.GraphQlOperation> = {};
+        const graphqlTypes: Record<FdrAPI.TypeId, FdrAPI.api.v1.register.TypeDefinition> = {};
+        const namespacesByOperationId = new Map<FdrAPI.GraphQlOperationId, string>();
+
+        // Get pre-processed GraphQL data from workspaces and build namespace mapping
+        for (const ossWorkspace of this.ossWorkspaces) {
+            // Merge processed GraphQL data from workspace
+            Object.assign(graphqlOperations, ossWorkspace.getGraphqlOperations());
+            Object.assign(graphqlTypes, ossWorkspace.getGraphqlTypes());
+
+            // Build namespace mapping by processing individual specs
+            const graphqlSpecs = ossWorkspace.allSpecs.filter((spec): spec is GraphQLSpec => spec.type === "graphql");
+            for (const spec of graphqlSpecs) {
+                if (spec.namespace != null) {
+                    try {
+                        // Process each spec individually to map operations to namespaces
+                        const converter = new GraphQLConverter({
+                            context: this.taskContext,
+                            filePath: spec.absoluteFilepath
+                        });
+                        const graphqlResult = await converter.convert();
+
+                        // Map operations from this spec to its namespace
+                        for (const operationId of Object.keys(graphqlResult.graphqlOperations)) {
+                            namespacesByOperationId.set(FdrAPI.GraphQlOperationId(operationId), spec.namespace);
+                        }
+                    } catch (error) {
+                        this.taskContext.logger.error(
+                            `Failed to process GraphQL spec for namespace mapping ${spec.absoluteFilepath}:`,
+                            String(error)
+                        );
+                    }
+                }
+            }
+        }
+
+        return { operations: graphqlOperations, types: graphqlTypes, namespacesByOperationId };
     }
 
     /**
