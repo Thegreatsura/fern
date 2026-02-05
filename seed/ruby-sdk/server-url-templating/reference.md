@@ -12,10 +12,6 @@
 <dd>
 
 ```ruby
-require "seed"
-
-client = Seed::Client.new();
-
 client.get_users();
 ```
 </dd>
@@ -56,10 +52,6 @@ client.get_users();
 <dd>
 
 ```ruby
-require "seed"
-
-client = Seed::Client.new();
-
 client.get_user(user_id: 'userId');
 ```
 </dd>
@@ -108,10 +100,6 @@ client.get_user(user_id: 'userId');
 <dd>
 
 ```ruby
-require "seed"
-
-client = Seed::Client.new();
-
 client.get_token(
   client_id: 'client_id',
   client_secret: 'client_secret'
