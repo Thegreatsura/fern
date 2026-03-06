@@ -25,7 +25,6 @@ impl RealtimeClient {
         session_id: &str,
         model: Option<&str>,
         temperature: Option<&str>,
-        language_code: Option<&str>,
     ) -> Result<Self, ApiError> {
         let full_url = format!("{}/realtime/{session_id}", url);
         let mut options = WebSocketOptions::default();
@@ -39,11 +38,6 @@ impl RealtimeClient {
             options
                 .query_params
                 .push(("temperature".to_string(), v.to_string()));
-        }
-        if let Some(v) = language_code {
-            options
-                .query_params
-                .push(("language-code".to_string(), v.to_string()));
         }
         let (ws, incoming_rx) = WebSocketClient::connect(&full_url, options).await?;
         Ok(Self { ws, incoming_rx })
@@ -99,15 +93,7 @@ impl RealtimeConnector {
         session_id: &str,
         model: Option<&str>,
         temperature: Option<&str>,
-        language_code: Option<&str>,
     ) -> Result<RealtimeClient, ApiError> {
-        RealtimeClient::connect(
-            &self.base_url,
-            session_id,
-            model,
-            temperature,
-            language_code,
-        )
-        .await
+        RealtimeClient::connect(&self.base_url, session_id, model, temperature).await
     }
 }

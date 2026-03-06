@@ -5,29 +5,21 @@ use tokio::sync::mpsc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
-pub enum RealtimeServerMessage {
+pub enum RealtimeNoAuthServerMessage {
     #[serde(rename = "receive")]
-    ReceiveEvent(ReceiveEvent),
-    #[serde(rename = "receive_snake_case")]
-    ReceiveSnakeCase(ReceiveSnakeCase),
-    #[serde(rename = "receive2")]
-    ReceiveEvent2(ReceiveEvent2),
-    #[serde(rename = "receive3")]
-    ReceiveEvent3(ReceiveEvent3),
+    NoAuthReceiveEvent(NoAuthReceiveEvent),
 }
-pub struct RealtimeClient {
+pub struct RealtimeNoAuthClient {
     ws: WebSocketClient,
     incoming_rx: mpsc::UnboundedReceiver<Result<WebSocketMessage, ApiError>>,
 }
-impl RealtimeClient {
+impl RealtimeNoAuthClient {
     pub async fn connect(
         url: &str,
         session_id: &str,
         model: Option<&str>,
-        temperature: Option<&str>,
-        language_code: Option<&str>,
     ) -> Result<Self, ApiError> {
-        let full_url = format!("{}/realtime/{session_id}", url);
+        let full_url = format!("{}/realtime-no-auth/{session_id}", url);
         let mut options = WebSocketOptions::default();
 
         if let Some(v) = model {
@@ -35,38 +27,20 @@ impl RealtimeClient {
                 .query_params
                 .push(("model".to_string(), v.to_string()));
         }
-        if let Some(v) = temperature {
-            options
-                .query_params
-                .push(("temperature".to_string(), v.to_string()));
-        }
-        if let Some(v) = language_code {
-            options
-                .query_params
-                .push(("language-code".to_string(), v.to_string()));
-        }
         let (ws, incoming_rx) = WebSocketClient::connect(&full_url, options).await?;
         Ok(Self { ws, incoming_rx })
     }
 
-    pub async fn send_send(&self, message: &SendEvent) -> Result<(), ApiError> {
+    pub async fn send_send(&self, message: &NoAuthSendEvent) -> Result<(), ApiError> {
         self.ws.send_json(message).await
     }
 
-    pub async fn send_send_snake_case(&self, message: &SendSnakeCase) -> Result<(), ApiError> {
-        self.ws.send_json(message).await
-    }
-
-    pub async fn send_send2(&self, message: &SendEvent2) -> Result<(), ApiError> {
-        self.ws.send_json(message).await
-    }
-
-    pub async fn recv(&mut self) -> Option<Result<RealtimeServerMessage, ApiError>> {
+    pub async fn recv(&mut self) -> Option<Result<RealtimeNoAuthServerMessage, ApiError>> {
         loop {
             match self.incoming_rx.recv().await {
                 Some(Ok(WebSocketMessage::Text(raw))) => {
                     return Some(
-                        serde_json::from_str::<RealtimeServerMessage>(&raw)
+                        serde_json::from_str::<RealtimeNoAuthServerMessage>(&raw)
                             .map_err(ApiError::Serialization),
                     );
                 }
@@ -83,13 +57,13 @@ impl RealtimeClient {
         self.ws.close().await
     }
 }
-/// Connector for the Realtime WebSocket channel.
+/// Connector for the RealtimeNoAuth WebSocket channel.
 /// Provides access to the WebSocket channel through the root client.
-pub struct RealtimeConnector {
+pub struct RealtimeNoAuthConnector {
     base_url: String,
 }
 
-impl RealtimeConnector {
+impl RealtimeNoAuthConnector {
     pub fn new(base_url: String) -> Self {
         Self { base_url }
     }
@@ -98,16 +72,7 @@ impl RealtimeConnector {
         &self,
         session_id: &str,
         model: Option<&str>,
-        temperature: Option<&str>,
-        language_code: Option<&str>,
-    ) -> Result<RealtimeClient, ApiError> {
-        RealtimeClient::connect(
-            &self.base_url,
-            session_id,
-            model,
-            temperature,
-            language_code,
-        )
-        .await
+    ) -> Result<RealtimeNoAuthClient, ApiError> {
+        RealtimeNoAuthClient::connect(&self.base_url, session_id, model).await
     }
 }
