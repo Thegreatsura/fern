@@ -481,6 +481,17 @@
             }
           ]
         },
+        "playground-docs": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Documentation rendered below this scheme's input in the API playground, instead of `docs`.\nSupports a markdown subset: `[label](url)` links (absolute or relative), bare URLs,\n`inline code`, and blank-line-separated paragraphs. Other markdown (bold, lists, headings)\nis rendered as plain text."
+        },
         "scheme": {
           "const": "oauth"
         },
@@ -760,6 +771,17 @@
             }
           ]
         },
+        "playground-docs": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Documentation rendered below this scheme's input in the API playground, instead of `docs`.\nSupports a markdown subset: `[label](url)` links (absolute or relative), bare URLs,\n`inline code`, and blank-line-separated paragraphs. Other markdown (bold, lists, headings)\nis rendered as plain text."
+        },
         "header": {
           "type": "string"
         },
@@ -862,6 +884,17 @@
             }
           ]
         },
+        "playground-docs": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Documentation rendered below this scheme's input in the API playground, instead of `docs`.\nSupports a markdown subset: `[label](url)` links (absolute or relative), bare URLs,\n`inline code`, and blank-line-separated paragraphs. Other markdown (bold, lists, headings)\nis rendered as plain text."
+        },
         "scheme": {
           "const": "basic"
         },
@@ -903,6 +936,17 @@
               "type": "null"
             }
           ]
+        },
+        "playground-docs": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Documentation rendered below this scheme's input in the API playground, instead of `docs`.\nSupports a markdown subset: `[label](url)` links (absolute or relative), bare URLs,\n`inline code`, and blank-line-separated paragraphs. Other markdown (bold, lists, headings)\nis rendered as plain text."
         },
         "scheme": {
           "const": "bearer"
@@ -1013,6 +1057,17 @@
               "type": "null"
             }
           ]
+        },
+        "playground-docs": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Documentation rendered below this scheme's input in the API playground, instead of `docs`.\nSupports a markdown subset: `[label](url)` links (absolute or relative), bare URLs,\n`inline code`, and blank-line-separated paragraphs. Other markdown (bold, lists, headings)\nis rendered as plain text."
         },
         "scheme": {
           "const": "bearer"
@@ -4526,6 +4581,17 @@
               "type": "null"
             }
           ]
+        },
+        "workflows": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Whether generated `.github/workflows/*` files are committed. Defaults to true. When false, existing workflow files are left untouched and newly generated ones are skipped."
         }
       },
       "required": [
@@ -4577,6 +4643,17 @@
               "type": "null"
             }
           ]
+        },
+        "workflows": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Whether generated `.github/workflows/*` files are committed. Defaults to true. When false, existing workflow files are left untouched and newly generated ones are skipped."
         }
       },
       "required": [
@@ -4666,6 +4743,17 @@
               "type": "null"
             }
           ]
+        },
+        "workflows": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Whether generated `.github/workflows/*` files are committed. Defaults to true. When false, existing workflow files are left untouched and newly generated ones are skipped."
         }
       },
       "required": [
@@ -4702,6 +4790,17 @@
               "type": "null"
             }
           ]
+        },
+        "workflows": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Whether generated `.github/workflows/*` files are committed. Defaults to true. When false, existing workflow files are left untouched and newly generated ones are skipped."
         }
       },
       "required": [
