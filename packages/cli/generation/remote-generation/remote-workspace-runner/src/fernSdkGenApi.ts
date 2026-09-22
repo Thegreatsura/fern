@@ -20,8 +20,10 @@ import {
     GeneratorConfigCompatibilityError,
     type GeneratorLanguage,
     getGeneratorLanguage,
+    selectUnpinnedSdkConfigRoute,
     validateGeneratorConfigCompatibility
 } from "./sdk-gen-client/index.js";
+import { isSdkConfigUnpinnedGeneratorVersion } from "./sdkConfigGeneratorVersion.js";
 
 const POLL_INTERVAL_MS = 2_000;
 const POLL_TIMEOUT_MS = 15 * 60 * 1_000;
@@ -39,6 +41,7 @@ const MAX_REQUEST_FIELD_BYTES = 1024 * 1024;
 const MAX_MULTIPART_BODY_BYTES = 60 * 1024 * 1024;
 const MAX_PUBLISH_CREDENTIAL_FIELD_LENGTH = 16 * 1024;
 const MAX_PUBLISH_CREDENTIALS_BYTES = 64 * 1024;
+const UNPINNED_FERN_GENERATOR_VERSION_KEY = "unpinned";
 const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 const TARGET_ID_SEED_COLLATOR = new Intl.Collator("en", { numeric: true });
 
@@ -141,7 +144,7 @@ export interface FernSdkGenApiRequest {
         apiInputId: string;
         language: FernSdkGenApiLanguage;
         sdk: { name: string; version: string; apiVersion?: string };
-        fernGenerator: { id: string; version: string };
+        fernGenerator: { id: string; version?: string };
         payloadKind: GenerationPayloadKind;
         package?: FernSdkGenApiPackageConfig;
         invocation: {
@@ -182,6 +185,29 @@ export function isFernSdkGenApiEnabled(): boolean {
     return configured.trim().toLowerCase() === "true";
 }
 
+/**
+ * Generators that only run through sdk-gen-api and have no Fiddle fallback.
+ * When sdk-gen-api is disabled, these generators must fail fast with a clear
+ * message instead of falling through to Fiddle where they would fail opaquely.
+ */
+const SDK_GEN_API_ONLY_GENERATORS: ReadonlySet<string> = new Set(["fernapi/fern-mcp-server"]);
+
+export function isSdkGenApiOnly(generatorName: string): boolean {
+    return SDK_GEN_API_ONLY_GENERATORS.has(generatorName);
+}
+
+/**
+ * Whether `fern generate` builds this generator's SDK Config v1 payload from generators.yml
+ * in memory when no `--sdk-config` document is given. Deliberately limited to sdk-gen-api-only
+ * generators: they have no legacy route and generators.yml is their configuration surface, so
+ * demanding a migrated document would be a step with nothing to migrate. Every other generator
+ * keeps the explicit `fern sdk migrate` → `--sdk-config` flow. Widening this to all generators
+ * at or past their cutover is a one-line change here, and a product decision.
+ */
+export function synthesizesSdkConfig(generatorName: string): boolean {
+    return isSdkGenApiOnly(generatorName);
+}
+
 export function getFernSdkGenApiOrigin(): string | undefined {
     const configured = process.env.FERN_SDK_GEN_API_ORIGIN ?? process.env.DEFAULT_SDK_GEN_API_ORIGIN;
     if (configured == null) {
@@ -217,6 +243,10 @@ export function selectFernSdkGenApiRoute(
     if (language == null) {
         return undefined;
     }
+    // `configKind` is what the caller can supply for this generator: "sdk-config-v1" when a
+    // `--sdk-config` document was given or the generator synthesizes one from generators.yml
+    // (see synthesizesSdkConfig), else "legacy-fern". A mismatch with the version's expected
+    // kind is the "run `fern sdk migrate`" error.
     return validateGeneratorConfigCompatibility({
         generatorId: generatorInvocation.name,
         language: generatorInvocation.language ?? language,
@@ -701,6 +731,7 @@ export interface FernSdkGenApiBuildParameters {
     organization: string;
     cliVersion: string | undefined;
     generatorInvocation: generatorsYml.GeneratorInvocation;
+    sdkGenApiRoute?: GenerationConfigRoute;
     sdkName?: string;
     sdkVersion: string;
     apiVersion?: string;
@@ -979,6 +1010,7 @@ function prepareFernSdkGenApiSubmission(participants: FernSdkGenApiBuildParamete
         specsTarGzBuffer: first.specsTarGzBuffer,
         targets: participants.map((participant) => ({
             generatorInvocation: participant.generatorInvocation,
+            sdkGenApiRoute: participant.sdkGenApiRoute,
             sdkName: participant.sdkName,
             sdkVersion: participant.sdkVersion,
             apiVersion: participant.apiVersion,
@@ -1215,13 +1247,9 @@ function assertGeneratorConfigCompatibility(participants: FernSdkGenApiBuildPara
                 { code: CliError.Code.ConfigError }
             );
         }
+        let route: GenerationConfigRoute;
         try {
-            validateGeneratorConfigCompatibility({
-                generatorId: generatorInvocation.name,
-                language,
-                requestedVersion: generatorInvocation.version,
-                configKind: participant.payload.payloadKind === "fern-runtime-bundle" ? "legacy-fern" : "sdk-config-v1"
-            });
+            route = validateParticipantRoute(participant, language);
         } catch (error) {
             if (!(error instanceof GeneratorConfigCompatibilityError)) {
                 throw error;
@@ -1230,7 +1258,41 @@ function assertGeneratorConfigCompatibility(participants: FernSdkGenApiBuildPara
                 code: CliError.Code.ConfigError
             });
         }
+        if (route.payloadKind !== participant.payload.payloadKind) {
+            participant.context.failAndThrow(
+                `Cannot submit SDK generation to sdk-gen-api: selected route payload ${route.payloadKind} does not match participant payload ${participant.payload.payloadKind}`,
+                undefined,
+                { code: CliError.Code.ConfigError }
+            );
+        }
     }
+}
+
+function validateParticipantRoute(
+    participant: FernSdkGenApiBuildParameters,
+    language: FernSdkGenApiLanguage
+): GenerationConfigRoute {
+    const { generatorInvocation, sdkGenApiRoute } = participant;
+    if (sdkGenApiRoute?.requestedVersion == null) {
+        if (sdkGenApiRoute != null) {
+            if (!isSdkConfigUnpinnedGeneratorVersion(generatorInvocation.version)) {
+                throw new Error("An unpinned sdk-gen-api route must use the internal SDK Config generator marker");
+            }
+            return selectUnpinnedSdkConfigRoute({ generatorId: generatorInvocation.name, language });
+        }
+        return validateGeneratorConfigCompatibility({
+            generatorId: generatorInvocation.name,
+            language,
+            requestedVersion: generatorInvocation.version,
+            configKind: participant.payload.payloadKind === "fern-runtime-bundle" ? "legacy-fern" : "sdk-config-v1"
+        });
+    }
+    return validateGeneratorConfigCompatibility({
+        generatorId: generatorInvocation.name,
+        language,
+        requestedVersion: sdkGenApiRoute.requestedVersion,
+        configKind: sdkGenApiRoute.configKind
+    });
 }
 
 export function formatGeneratorConfigCompatibilityError(error: GeneratorConfigCompatibilityError): string {
@@ -1253,6 +1315,29 @@ export function formatGeneratorConfigCompatibilityError(error: GeneratorConfigCo
     return `Cannot submit SDK generation to sdk-gen-api: ${error.message} [${diagnostic}].${migrationHint}`;
 }
 
+function resolveFernGeneratorWireVersion(
+    route: GenerationConfigRoute | undefined,
+    invocation: generatorsYml.GeneratorInvocation
+): string | undefined {
+    if (route == null) {
+        return invocation.version;
+    }
+    if (route.requestedVersion != null) {
+        return route.requestedVersion;
+    }
+    if (!isSdkConfigUnpinnedGeneratorVersion(invocation.version)) {
+        throw new Error("An unpinned sdk-gen-api route must use the internal SDK Config generator marker");
+    }
+    return undefined;
+}
+
+function resolveFernGeneratorVersionKey(
+    route: GenerationConfigRoute | undefined,
+    invocation: generatorsYml.GeneratorInvocation
+): string {
+    return resolveFernGeneratorWireVersion(route, invocation) ?? UNPINNED_FERN_GENERATOR_VERSION_KEY;
+}
+
 function compareFernSdkGenApiParticipants(
     left: FernSdkGenApiBuildParameters,
     right: FernSdkGenApiBuildParameters
@@ -1265,7 +1350,10 @@ function compareFernSdkGenApiParticipants(
     if (generatorComparison !== 0) {
         return generatorComparison;
     }
-    const versionComparison = left.generatorInvocation.version.localeCompare(right.generatorInvocation.version);
+    const versionComparison = resolveFernGeneratorVersionKey(
+        left.sdkGenApiRoute,
+        left.generatorInvocation
+    ).localeCompare(resolveFernGeneratorVersionKey(right.sdkGenApiRoute, right.generatorInvocation));
     if (versionComparison !== 0) {
         return versionComparison;
     }
@@ -1575,6 +1663,7 @@ export function createFernSdkGenApiRequest({
     organization,
     cliVersion,
     generatorInvocation,
+    sdkGenApiRoute,
     sdkName,
     sdkVersion,
     apiVersion,
@@ -1586,6 +1675,7 @@ export function createFernSdkGenApiRequest({
     organization: string;
     cliVersion: string | undefined;
     generatorInvocation: generatorsYml.GeneratorInvocation;
+    sdkGenApiRoute?: GenerationConfigRoute;
     sdkName?: string;
     sdkVersion: string;
     apiVersion?: string;
@@ -1598,7 +1688,7 @@ export function createFernSdkGenApiRequest({
         organization,
         cliVersion,
         specsTarGzBuffer,
-        targets: [{ generatorInvocation, sdkName, sdkVersion, apiVersion, payload, requestedOutput }]
+        targets: [{ generatorInvocation, sdkGenApiRoute, sdkName, sdkVersion, apiVersion, payload, requestedOutput }]
     });
 }
 
@@ -1615,6 +1705,7 @@ export function createFernSdkGenApiBatchRequest({
     specsTarGzBuffer: Buffer;
     targets: Array<{
         generatorInvocation: generatorsYml.GeneratorInvocation;
+        sdkGenApiRoute?: GenerationConfigRoute;
         sdkName?: string;
         sdkVersion: string;
         apiVersion?: string;
@@ -1642,7 +1733,17 @@ export function createFernSdkGenApiBatchRequest({
     });
     const requestTargets = targets.map(
         (
-            { generatorInvocation, sdkName, sdkVersion, apiVersion, targetIdSeed, audiences, payload, requestedOutput },
+            {
+                generatorInvocation,
+                sdkGenApiRoute,
+                sdkName,
+                sdkVersion,
+                apiVersion,
+                targetIdSeed,
+                audiences,
+                payload,
+                requestedOutput
+            },
             index
         ) => {
             const language = getFernSdkGenApiLanguage(generatorInvocation.name);
@@ -1653,9 +1754,11 @@ export function createFernSdkGenApiBatchRequest({
             // SDK Config is the package configuration authority. Legacy output-derived package
             // identity must not overwrite a customer-edited SDK Config document.
             const packageConfig = payload.payloadKind === "fern-runtime-bundle" ? output.package : payload.package;
+            const fernGeneratorVersion = resolveFernGeneratorWireVersion(sdkGenApiRoute, generatorInvocation);
+            const fernGeneratorVersionKey = resolveFernGeneratorVersionKey(sdkGenApiRoute, generatorInvocation);
             const targetId = createHash("sha256")
                 .update(
-                    `${apiName}:${generatorInvocation.name}:${generatorInvocation.version}:${targetIdSeed ?? index.toString()}`
+                    `${apiName}:${generatorInvocation.name}:${fernGeneratorVersionKey}:${targetIdSeed ?? index.toString()}`
                 )
                 .digest("hex")
                 .slice(0, 20);
@@ -1670,7 +1773,7 @@ export function createFernSdkGenApiBatchRequest({
                 },
                 fernGenerator: {
                     id: generatorInvocation.name,
-                    version: generatorInvocation.version
+                    ...(fernGeneratorVersion != null ? { version: fernGeneratorVersion } : {})
                 },
                 payloadKind: payload.payloadKind,
                 ...(packageConfig != null ? { package: packageConfig } : {}),
