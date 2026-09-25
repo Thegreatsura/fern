@@ -1125,7 +1125,8 @@ export class DocsDefinitionResolver {
                           footerNav: this.parsedDocsConfig.theme.footerNav,
                           "language-switcher": this.parsedDocsConfig.theme.languageSwitcher,
                           "product-switcher": this.parsedDocsConfig.theme
-                              .productSwitcher as DocsV1Write.DocsThemeConfig["product-switcher"]
+                              .productSwitcher as DocsV1Write.DocsThemeConfig["product-switcher"],
+                          "site-switcher": convertThemeSiteSwitcher(this.parsedDocsConfig.theme.siteSwitcher)
                       }
                     : undefined,
             // deprecated
@@ -1269,7 +1270,18 @@ export class DocsDefinitionResolver {
                 absoluteFilepath: spec.absolutePath,
                 absoluteFilepathToOverrides: spec.absoluteOverridePaths,
                 absoluteFilepathToOverlays: spec.absoluteOverlayPaths[0],
-                settings: getOpenAPISettings(),
+                settings: getOpenAPISettings({
+                    options: {
+                        typeDatesAsStrings: spec.settings?.typeDatesAsStrings,
+                        useBytesForBinaryResponse: spec.settings?.useBytesForBinaryResponse,
+                        respectParameterContent: spec.settings?.respectParameterContent,
+                        respectOperationIdWordBoundaries: spec.settings?.respectOperationIdWordBoundaries,
+                        inferForwardCompatible: spec.settings?.inferForwardCompatible,
+                        preserveOneOfInAllOf: spec.settings?.preserveOneOfInAllOf,
+                        anyOfSiblingPropertiesAsObject: spec.settings?.anyOfSiblingPropertiesAsObject,
+                        errorResponses: toOpenApiErrorResponses(spec.settings?.errorResponses)
+                    }
+                }),
                 source: {
                     // AsyncAPI uses the OpenAPISpec container because OSSWorkspace converts
                     // both formats into the same IR. source.type selects the actual parser.
@@ -3113,6 +3125,27 @@ export class DocsDefinitionResolver {
     }
 }
 
+function toOpenApiErrorResponses(
+    errorResponses: docsYml.RawSchemas.ApiSpecErrorResponses | undefined
+): NonNullable<ReturnType<typeof getOpenAPISettings>["errorResponses"]> | undefined {
+    if (errorResponses == null) {
+        return undefined;
+    }
+    return {
+        schema: errorResponses.schema,
+        ...(errorResponses.name == null ? {} : { name: errorResponses.name }),
+        ...(errorResponses.applyTo == null ? {} : { "apply-to": errorResponses.applyTo }),
+        ...(errorResponses.ensure == null
+            ? {}
+            : {
+                  ensure: errorResponses.ensure.map((entry) => ({
+                      "status-code": entry.statusCode,
+                      ...(entry.methods == null ? {} : { methods: entry.methods })
+                  }))
+              })
+    };
+}
+
 function createEditThisPageUrl(
     editThisPage: docsYml.RawSchemas.FernDocsConfig.EditThisPageConfig | undefined,
     pageFilepath: string
@@ -3139,6 +3172,21 @@ export function convertThemeTabs(
         style: tabs.style,
         alignment: tabs.alignment?.toUpperCase() as DocsV1Write.DocsTabsObjectConfig["alignment"],
         placement: tabs.placement?.toUpperCase() as DocsV1Write.DocsTabsObjectConfig["placement"]
+    };
+}
+
+export function convertThemeSiteSwitcher(
+    siteSwitcher: docsYml.RawSchemas.SiteSwitcherThemeConfig | undefined
+): DocsV1Write.DocsThemeConfig["site-switcher"] | undefined {
+    if (siteSwitcher == null) {
+        return undefined;
+    }
+    return {
+        enabled: siteSwitcher.enabled,
+        order: siteSwitcher.order,
+        hide: siteSwitcher.hide,
+        labels: siteSwitcher.labels,
+        "show-products": siteSwitcher.showProducts
     };
 }
 
