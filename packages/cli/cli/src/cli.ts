@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import type { ReadStream, WriteStream } from "node:tty";
 import { fromBinary, toBinary } from "@bufbuild/protobuf";
 import { CodeGeneratorRequestSchema, CodeGeneratorResponseSchema } from "@bufbuild/protobuf/wkt";
+import { getToken } from "@fern-api/auth";
 import { getOrCreateFernRunId } from "@fern-api/cli-telemetry";
 import type { OutputFormat } from "@fern-api/cli-v2";
 import {
@@ -34,6 +35,7 @@ import {
 import { AbsoluteFilePath, cwd, doesPathExist, isURL, resolve } from "@fern-api/fs-utils";
 import { formatBootstrapSummary, replayForget, replayInit, replayResolve, replayStatus } from "@fern-api/generator-cli";
 import {
+    getDefaultOrganizationName,
     initializeAPI,
     initializeDocs,
     initializeWithMintlify,
@@ -456,13 +458,22 @@ function addInitCommand(cli: Argv<GlobalCliOptions>, cliContext: CliContext) {
                 const projectConfig = await getOrganization(cliContext);
                 if (projectConfig != null) {
                     argv.organization = projectConfig;
-                } else {
+                } else if (cliContext.isInteractive) {
                     argv.organization = await cliContext.getInput({
                         message: "Please enter your organization",
                         nonInteractiveError:
                             "--organization is required in non-interactive mode (stdin is not a TTY or CI is set). Example: fern init --organization acme"
                     });
+                } else if ((await getToken()) == null) {
+                    // Nothing to name the organization after (no prompt, no login), so an agent or script without an
+                    // account can still get a project it can publish with `fern generate --guest`.
+                    argv.organization = getDefaultOrganizationName(cwd());
+                    cliContext.logger.info(
+                        `No --organization given and no Fern login found; using ${chalk.bold(argv.organization)} from the directory name. Pass --organization to choose another.`
+                    );
                 }
+                // Otherwise `createFernDirectoryAndWorkspace` (@fern-api/init) reads the organization from the login or
+                // FERN_TOKEN.
             }
             if (argv.api != null && argv.docs != null) {
                 return cliContext.failWithoutThrowing(
@@ -531,7 +542,9 @@ function addInitCommand(cli: Argv<GlobalCliOptions>, cliContext: CliContext) {
                 });
             } else {
                 const useFernDefinition = argv["fern-definition"] === true;
-                const useSdkConfig = isSdkConfigInitEnabled() && !useFernDefinition;
+                const useGrpc = argv.grpc === true || argv.proto != null;
+                // gRPC init only scaffolds generators.yml, so it always uses the generators.yml flow.
+                const useSdkConfig = isSdkConfigInitEnabled() && !useFernDefinition && !useGrpc;
                 let absoluteOpenApiPath: AbsoluteFilePath | undefined = undefined;
                 let openApiUrl: string | undefined = undefined;
                 let absoluteProtoPath: AbsoluteFilePath | undefined = undefined;
