@@ -20,6 +20,7 @@ import {
     validateFernSdkGenApiPublishUrl,
     validateFernSdkGenApiPublishTargets as validatePublishTargets
 } from "./directPublishCredentials.js";
+import { getGuestSdkBuildUrl } from "./guestSdkBuildLink.js";
 import { getSdkGenApiPreviewOutputDirectoryName } from "./previewOutputDirectory.js";
 import { type PublishTarget } from "./publishTarget.js";
 import { downloadArchiveForTask, downloadFilesForTask } from "./RemoteTaskHandler.js";
@@ -966,8 +967,8 @@ export interface FernSdkGenApiCandidate {
     sdkVersion: string | undefined;
     specsTarGzBuffer: Buffer | undefined;
     whitelabel?: FernFiddle.WhitelabelConfig;
-    /** The resolved SDK Config output. Absent for generators.yml groups. */
-    sdkConfigRequestedOutput?: FernSdkGenApiRequestedOutput;
+    /** The effective output used to decide whether AUTO can be resolved after generation. */
+    requestedOutput?: FernSdkGenApiRequestedOutput;
 }
 
 export interface EligibleFernSdkGenApiCandidate extends FernSdkGenApiCandidate {
@@ -982,13 +983,13 @@ export function isEligibleForFernSdkGenApi(
     const hasSupportedVersion =
         sdkVersion == null ||
         (sdkVersion.trim().length > 0 &&
-            (!isAutoVersion(sdkVersion) || supportsAutoVersion(candidate.sdkConfigRequestedOutput)));
+            (!isAutoVersion(sdkVersion) || supportsAutoVersion(candidate.requestedOutput)));
     return language != null && hasSupportedVersion && specsTarGzBuffer != null && whitelabel == null;
 }
 
 /** Only Fiddle's GitHub delivery replaces the AUTO placeholder; other outputs would ship it. */
-export function supportsAutoVersion(sdkConfigRequestedOutput: FernSdkGenApiRequestedOutput | undefined): boolean {
-    return sdkConfigRequestedOutput?.type === "github";
+export function supportsAutoVersion(requestedOutput: FernSdkGenApiRequestedOutput | undefined): boolean {
+    return requestedOutput?.type === "github";
 }
 
 /** The reason that isEligibleForFernSdkGenApi rejected a candidate. */
@@ -1005,9 +1006,9 @@ export function describeFernSdkGenApiIneligibility({
     if (whitelabel != null) {
         return "whitelabel generation has not yet moved from Fiddle to the shared pipeline";
     }
-    if (sdkVersion != null && isAutoVersion(sdkVersion) && !supportsAutoVersion(candidate.sdkConfigRequestedOutput)) {
+    if (sdkVersion != null && isAutoVersion(sdkVersion) && !supportsAutoVersion(candidate.requestedOutput)) {
         if (!isSdkConfigTarget) {
-            return "automatic SDK versioning has not yet moved from Fiddle to the shared pipeline";
+            return "automatic SDK versioning (--version AUTO) through sdk-gen-api requires GitHub output in generators.yml";
         }
         return isPreview
             ? "preview generation only downloads files, so it cannot use --version AUTO"
@@ -1510,7 +1511,7 @@ async function executeFernSdkGenApiBuild(
 
         const allTargetsTerminal = request.targets.every((requestTarget) => isTerminal(status, requestTarget.targetId));
         if (allTargetsTerminal || status.status === "failed" || status.status === "succeeded") {
-            return Promise.allSettled(
+            const results = await Promise.allSettled(
                 participants.map((participant, index) =>
                     finishFernSdkGenApiTarget(
                         participant,
@@ -1520,6 +1521,8 @@ async function executeFernSdkGenApiBuild(
                     )
                 )
             );
+            logGuestBuildLink({ participant: first, status, buildId });
+            return results;
         }
         if (isFinalPoll) {
             return first.context.failAndThrow(
@@ -2125,6 +2128,35 @@ function formatKiB(bytes: number): string {
 function isTerminal(status: FernBuildStatus, targetId: string): boolean {
     const target = status.targets.find((candidate) => candidate.targetId === targetId);
     return target?.status === "failed" || target?.status === "succeeded";
+}
+
+/**
+ * Like the site-only claim link of a guest docs publish: the one dashboard page of this build (all
+ * its SDKs), where they can be re-downloaded and claimed while the guest session's work is kept.
+ * Printed once per build, and only when the build produced something to download: a no-change
+ * AUTO preview has no artifact, so there is nothing to link to.
+ */
+function logGuestBuildLink({
+    participant,
+    status,
+    buildId
+}: {
+    participant: FernSdkGenApiBuildParameters;
+    status: FernBuildStatus;
+    buildId: string;
+}): void {
+    if (participant.token.type !== "guest") {
+        return;
+    }
+    if (!status.targets.some((target) => target.status === "succeeded" && target.result?.artifactUrl != null)) {
+        return;
+    }
+    const buildUrl = getGuestSdkBuildUrl({ claimUrl: participant.token.claimUrl, buildId });
+    participant.context.logger.info(
+        buildUrl != null
+            ? `Build ${buildId} is kept for 7 days: ${buildUrl} (claiming the session moves it into your organization)`
+            : `Build ${buildId} is kept for 7 days (claiming the session moves it into your organization)`
+    );
 }
 
 async function finishFernSdkGenApiTarget(

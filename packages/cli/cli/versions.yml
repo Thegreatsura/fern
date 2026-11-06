@@ -1,4 +1,43 @@
 # yaml-language-server: $schema=../../../fern-versions-yml.schema.json
+- version: 5.197.0
+  changelogEntry:
+    - summary: |
+        Add `fern docs export` to download your live Fern-hosted docs as a static site (`--format html`),
+        Markdown (`--format md`) or one PDF (`--format pdf`).
+      type: feat
+  createdAt: "2026-11-05"
+  irVersion: 67
+- version: 5.196.2
+  changelogEntry:
+    - summary: |
+        Serve `agents.robots-txt`, `agents.llms-txt`, and `agents.llms-full-txt` files that are not named
+        `robots.txt`, `llms.txt`, or `llms-full.txt` (or that live in a subfolder) on the new docs hosting.
+        The configured file is now also published at its well-known path.
+      type: fix
+  createdAt: "2026-11-05"
+  irVersion: 67
+- version: 5.196.1
+  changelogEntry:
+    - summary: |
+        `fern generate --guest` no longer prints "Authentication required. Please run 'fern login'..." after a
+        successful run. The end-of-run generator upgrade check asked sdk-gen-api for newer versions with an account
+        token; without an account it now stays quiet instead.
+      type: fix
+  createdAt: "2026-11-05"
+  irVersion: 67
+- version: 5.196.0
+  changelogEntry:
+    - summary: |
+        `fern generate --guest` prints, for each generated SDK, its build ID and dashboard link
+        (`/sdk/<buildId>`), where the SDK can be re-downloaded for 7 days and claimed; claiming the
+        session moves the builds into the claimed organization.
+      type: feat
+    - summary: |
+        `fern generate --version AUTO` can now use sdk-gen-api for legacy `generators.yml` SDK targets
+        with GitHub output.
+      type: fix
+  createdAt: "2026-11-05"
+  irVersion: 67
 - version: 5.195.0
   changelogEntry:
     - summary: |
