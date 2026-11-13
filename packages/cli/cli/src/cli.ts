@@ -358,7 +358,12 @@ async function tryRunCli(cliContext: CliContext) {
         // write to stdout. At this point argv._ is yargs' resolved command path, and aliases have
         // already populated argv.output.
         const isSdkMigrateStdout = argv._[0] === "sdk" && argv._[1] === "migrate" && argv.output === "-";
-        if ((argv as Record<string, unknown>).json === true || isSdkMigrateStdout) {
+        const isDocsLinkCheckMachineOutput =
+            argv._[0] === "docs" &&
+            argv._[1] === "link" &&
+            argv._[2] === "check" &&
+            (argv.output === "json" || argv.output === "csv");
+        if ((argv as Record<string, unknown>).json === true || isSdkMigrateStdout || isDocsLinkCheckMachineOutput) {
             cliContext.enableJsonMode();
         }
         cliContext.logFernVersionDebug();
@@ -1041,7 +1046,7 @@ function addGenerateCommand(cli: Argv<GlobalCliOptions>, cliContext: CliContext)
                     boolean: true,
                     default: false,
                     description:
-                        "Run without a Fern account: start (or reuse) a temporary guest session and generate under its guest organization. Claim the session from the printed link to keep the output. Cannot be combined with FERN_TOKEN or a saved login."
+                        "Run without a Fern account: start (or reuse) a temporary guest session and generate under its guest organization. SDKs are written to their output paths (download only, with a 7-day build link; generated code keeps the fern.config.json organization's names); --docs publishes a temporary site. Claim the session from the printed link (or fern claim) to move the work into an organization, where SDKs can be published to GitHub from the dashboard. Cannot be combined with FERN_TOKEN or a saved login."
                 })
                 .option("source", {
                     boolean: true,
@@ -2917,7 +2922,7 @@ function addDocsLinkCheckCommand(cli: Argv<GlobalCliOptions>, cliContext: CliCon
                 });
 
                 if (argv.output === "json" || argv.output === "csv") {
-                    await writeAndDrain(process.stdout, output + "\n");
+                    await cliContext.withRealStdout(() => writeAndDrain(process.stdout, output + "\n"));
                 } else {
                     await writeAndDrain(process.stderr, output + "\n");
                 }
