@@ -129,12 +129,18 @@ import { whoami } from "./commands/whoami/whoami.js";
 import { writeDefinitionForWorkspaces } from "./commands/write-definition/writeDefinitionForWorkspaces.js";
 import { writeDocsDefinitionForProject } from "./commands/write-docs-definition/writeDocsDefinitionForProject.js";
 import { FERN_CWD_ENV_VAR } from "./cwd.js";
+import {
+    ALLOW_OLD_CLI_VERSION_FLAG,
+    hasOldCliVersionConsent,
+    isOlderThanMinimumIsolatedCliVersion,
+    MINIMUM_ISOLATED_CLI_VERSION
+} from "./oldCliVersionGate.js";
 import { rerunFernCliAtVersion } from "./rerunFernCliAtVersion.js";
 import { resolveGroupGithubConfig } from "./resolveGroupGithubConfig.js";
 import { RUNTIME } from "./runtime.js";
 import { installProcessHandlers } from "./telemetry/processHandlers.js";
 import { isSdkConfigInitEnabled } from "./utils/isSdkConfigInitEnabled.js";
-import { getInvokedCommandName, isVersionRedirectionExempt } from "./utils/versionRedirection.js";
+import { getInvokedCommandName, isVersionQuery, isVersionRedirectionExempt } from "./utils/versionRedirection.js";
 
 // Node 26+ on Linux enables io_uring in libuv, which has a busy-loop bug that
 // hangs the process. UV_USE_IO_URING must be set before Node starts (libuv
@@ -227,8 +233,21 @@ async function runCli() {
             await tryRunCli(cliContext);
         } else {
             const versionOfCliToRun = await getIntendedVersionOfCli(cliContext);
-            if (cliContext.environment.packageVersion === versionOfCliToRun) {
+            // Older CLIs upgrade through an unisolated npx, so upgrade away from them with this CLI
+            // unless the user opted into running the older CLI.
+            const isUpgradeFromOldCli =
+                getInvokedCommandName(process.argv) === "upgrade" &&
+                isOlderThanMinimumIsolatedCliVersion(versionOfCliToRun) &&
+                !hasOldCliVersionConsent(process.argv.slice(2));
+            // Printing the version doesn't need the older CLI, so answer here instead of running it.
+            const isVersionQueryForOldCli =
+                isVersionQuery(process.argv) &&
+                isOlderThanMinimumIsolatedCliVersion(versionOfCliToRun) &&
+                !hasOldCliVersionConsent(process.argv.slice(2));
+            if (cliContext.environment.packageVersion === versionOfCliToRun || isUpgradeFromOldCli) {
                 await tryRunCli(cliContext);
+            } else if (isVersionQueryForOldCli) {
+                cliContext.logger.info(versionOfCliToRun);
             } else {
                 await rerunFernCliAtVersion({
                     version: versionOfCliToRun,
@@ -294,6 +313,10 @@ async function tryRunCli(cliContext: CliContext) {
         .option("log-level", {
             default: LogLevel.Info,
             choices: LOG_LEVELS
+        })
+        .option(ALLOW_OLD_CLI_VERSION_FLAG.slice(2), {
+            boolean: true,
+            description: `Run the CLI version pinned in fern.config.json even if it is older than ${MINIMUM_ISOLATED_CLI_VERSION}, which can run executables from the project directory`
         })
         .demandCommand()
         .recommendCommands();
